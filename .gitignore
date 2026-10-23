@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.enc
+.salt
+checkpoints.db
+~/.travel-agent/
+.DS_Store
+dist/
+*.egg-info/
+.pytest_cache/
