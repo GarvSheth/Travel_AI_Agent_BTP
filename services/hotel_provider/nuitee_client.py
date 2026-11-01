@@ -6,6 +6,9 @@ Endpoints used (all verified against docs.liteapi.travel and live responses):
     GET  /data/facilities   facility id -> name lookup
     GET  /data/hotel/ask    conversational Q&A about a single hotel (beta)
     POST /hotels/rates      live rates and availability
+    POST /rates/prebook     confirm an offer's price/availability -> prebookId  (book host)
+    POST /rates/book        final booking for a prebookId                      (book host)
+    GET  /bookings/{id}     full details of an existing booking                (book host)
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.liteapi.travel/v3.0"
+BOOK_BASE_URL = "https://book.liteapi.travel/v3.0"   # prebook / book live on a separate host
 _VALID_STARS = {x / 2 for x in range(2, 11)}  # 1.0, 1.5, ... 5.0
 
 
@@ -57,6 +61,7 @@ class NuiteeClient:
             )
 
         self.base_url = BASE_URL
+        self.book_base_url = BOOK_BASE_URL
         self._facilities: dict[int, str] | None = None
 
         self.session = requests.Session()
@@ -124,10 +129,11 @@ class NuiteeClient:
         params: dict[str, Any] | None = None,
         payload: dict[str, Any] | None = None,
         timeout: int = 30,
+        base_url: str | None = None,
     ) -> dict[str, Any]:
         """Send a request and return parsed JSON. The API key is never logged."""
 
-        url = f"{self.base_url}{endpoint}"
+        url = f"{base_url or self.base_url}{endpoint}"
 
         try:
             response = self.session.request(
@@ -289,23 +295,29 @@ class NuiteeClient:
 
     def search_hotel_rates(
         self,
-        city: str,
-        country_code: str,
-        check_in: str,
-        check_out: str,
+        city: str | None = None,
+        country_code: str | None = None,
+        check_in: str = "",
+        check_out: str = "",
         adults: int = 2,
         rooms: int = 1,
         currency: str = "INR",
         guest_nationality: str = "IN",
         limit: int = 20,
+        hotel_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Search for hotels and available rates in a city."""
+        """Live rates via POST /hotels/rates, for specific hotels or a whole city.
 
-        if not city.strip():
-            raise ValueError("City name cannot be empty.")
+        Give either ``hotel_ids`` or ``city`` + ``country_code``. Adults are
+        split across rooms as evenly as possible (3 adults, 2 rooms -> 2 + 1).
+        """
 
-        if not country_code.strip():
-            raise ValueError("Country code cannot be empty.")
+        ids = [h.strip() for h in hotel_ids or [] if h and h.strip()]
+        if not ids:
+            if not (city and city.strip()):
+                raise ValueError("Provide hotel IDs or a city name.")
+            if not (country_code and country_code.strip()):
+                raise ValueError("Country code cannot be empty.")
 
         if not currency.strip():
             raise ValueError("Currency cannot be empty.")
@@ -318,23 +330,84 @@ class NuiteeClient:
 
         self._validate_search(check_in, check_out, adults, rooms)
 
-        payload = {
-            "cityName": city,
-            "countryCode": country_code,
+        base, extra = divmod(adults, rooms)
+        payload: dict[str, Any] = {
             "checkin": check_in,
             "checkout": check_out,
             "occupancies": [
-                {"adults": adults}
-                for _ in range(rooms)
+                {"adults": base + (1 if i < extra else 0)}
+                for i in range(rooms)
             ],
-            "currency": currency,
-            "guestNationality": guest_nationality,
-            "limit": limit,
+            "currency": currency.strip().upper(),
+            "guestNationality": guest_nationality.strip().upper(),
             "timeout": 10,
             "roomMapping": True,
         }
+        if ids:
+            payload["hotelIds"] = ids
+        else:
+            payload.update({"cityName": city.strip(),
+                            "countryCode": country_code.strip().upper(),
+                            "limit": limit})
 
         return self._post("/hotels/rates", payload)
+
+    # ── Booking (book.liteapi.travel) ───────────────────────────────────
+
+    def prebook_rate(self, offer_id: str) -> dict[str, Any]:
+        """POST /rates/prebook: re-check an offer and get a prebookId for booking."""
+
+        if not offer_id or not offer_id.strip():
+            raise ValueError("Offer ID cannot be empty.")
+
+        return self._request(
+            "POST", "/rates/prebook",
+            payload={"offerId": offer_id.strip(), "usePaymentSdk": False},
+            timeout=60, base_url=self.book_base_url,
+        )
+
+    def book_rate(
+        self,
+        prebook_id: str,
+        holder: dict[str, str],
+        guests: list[dict[str, Any]],
+        payment_method: str,
+        client_reference: str | None = None,
+    ) -> dict[str, Any]:
+        """POST /rates/book: confirm the booking for a prebookId."""
+
+        if not prebook_id or not prebook_id.strip():
+            raise ValueError("Prebook ID cannot be empty.")
+
+        missing = [k for k in ("firstName", "lastName", "email", "phone")
+                   if not str(holder.get(k) or "").strip()]
+        if missing:
+            raise ValueError(f"Missing guest details: {', '.join(missing)}.")
+
+        if not guests:
+            raise ValueError("At least one guest is required.")
+
+        payload: dict[str, Any] = {
+            "prebookId": prebook_id.strip(),
+            "holder": holder,
+            "guests": guests,
+            "payment": {"method": payment_method},
+        }
+        if client_reference:
+            payload["clientReference"] = client_reference
+
+        return self._request("POST", "/rates/book", payload=payload, timeout=120,
+                             base_url=self.book_base_url)
+
+    def get_booking(self, booking_id: str) -> dict[str, Any]:
+        """GET /bookings/{bookingId}: the stored booking (source of truth for confirmations)."""
+
+        if not booking_id or not booking_id.strip():
+            raise ValueError("Booking ID cannot be empty.")
+
+        from urllib.parse import quote
+        return self._request("GET", f"/bookings/{quote(booking_id.strip(), safe='')}",
+                             timeout=60, base_url=self.book_base_url)
 
     def close(self) -> None:
         """Close the underlying HTTP session."""

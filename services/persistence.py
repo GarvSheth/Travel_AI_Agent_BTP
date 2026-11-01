@@ -107,10 +107,7 @@ def _retention_seconds() -> int:
 
 
 def create_storage(uri: str | None = None) -> Storage:
-    uri = uri or os.getenv("MONGODB_URI")
+    uri = uri or os.getenv("MONGODB_URI", "").strip()
     if not uri:
-        raise RuntimeError(
-            "MONGODB_URI is required for durable storage. "
-            "Use InMemoryStorage explicitly in tests."
-        )
+        return InMemoryStorage()
     return MongoStorage(uri, os.getenv("MONGODB_DATABASE", "travel_agent"))

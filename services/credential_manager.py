@@ -8,11 +8,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
-PROVIDER_KEYS = {
-    "gemini":      ["GEMINI_API_KEY",      "AMADEUS_API_KEY", "AMADEUS_API_SECRET", "MONGODB_URI"],
-    "anthropic":   ["ANTHROPIC_API_KEY",   "AMADEUS_API_KEY", "AMADEUS_API_SECRET", "MONGODB_URI"],
-    "openrouter":  ["OPENROUTER_API_KEY",  "AMADEUS_API_KEY", "AMADEUS_API_SECRET", "MONGODB_URI"],
-}
+REQUIRED_KEYS = ["GEMINI_API_KEY"]
 
 
 class CredentialManager:
@@ -30,7 +26,7 @@ class CredentialManager:
 
     @property
     def REQUIRED_KEYS(self) -> list[str]:
-        return PROVIDER_KEYS.get(self.provider, PROVIDER_KEYS["gemini"])
+        return REQUIRED_KEYS
 
     def _derive_key(self, password: str, salt: bytes) -> bytes:
         kdf = PBKDF2HMAC(
