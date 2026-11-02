@@ -161,11 +161,9 @@ def parse_extraction(data: dict, latest_message: str) -> dict:
 
     A fact is kept when its value is non-empty and its quote occurs verbatim in the
     latest message (requested_tasks is instead restricted to the TASKS enum).
-    Every discarded fact is logged with the reason.
     """
     message = _squash(latest_message)
     updates: dict = {}
-    dropped: list[str] = []
     for fact in data.get("facts") or []:
         if not isinstance(fact, dict):
             continue
@@ -173,16 +171,13 @@ def parse_extraction(data: dict, latest_message: str) -> dict:
         value = str(fact.get("value") or "").strip()
         quote = str(fact.get("quote") or "")
         if field not in FIELDS:
-            dropped.append(f"{field}: unknown field")
             continue
         if value.lower() in _PLACEHOLDERS:
             continue
         if field in UNQUOTED_FIELDS:
             if value not in TASKS:
-                dropped.append(f"{field}: {value!r} is not a known task")
                 continue
         elif not quote or _squash(quote) not in message:
-            dropped.append(f"{field}={value!r}: quote {quote!r} not found in message")
             continue
         if field in LIST_FIELDS:
             items = updates.setdefault(field, [])
@@ -190,8 +185,6 @@ def parse_extraction(data: dict, latest_message: str) -> dict:
                 items.append(value)
         else:
             updates[field] = _coerce(field, value)
-    if dropped:
-        print(f"[extraction] dropped facts: {dropped}", flush=True)
     return updates
 
 

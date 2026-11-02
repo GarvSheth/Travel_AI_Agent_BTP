@@ -13,7 +13,6 @@ from workflows.input_pipeline.nodes import (
     await_answer_node,
     extract_node,
     finalize_node,
-    log_section,
     validate_node,
 )
 from workflows.input_pipeline.state import InputPipelineState
@@ -77,7 +76,6 @@ def start_conversation(graph, thread_id: str, prompt: str) -> TurnResult:
     prompt = (prompt or "").strip()
     if not prompt:
         raise ValueError("Travel prompt cannot be empty.")
-    log_section("INITIAL USER INPUT", prompt)
     initial: InputPipelineState = {
         "original_prompt": prompt,
         "latest_user_message": prompt,
