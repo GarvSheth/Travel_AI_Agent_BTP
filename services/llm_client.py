@@ -37,7 +37,12 @@ class LLMClient(ABC):
     ) -> LLMResponse: ...
 
     @abstractmethod
-    def structured_output(self, messages: list[dict], system: str = "") -> str: ...
+    def structured_output(
+        self,
+        messages: list[dict],
+        system: str = "",
+        schema: Optional[dict] = None,
+    ) -> str: ...
 
 
 # ── Anthropic ────────────────────────────────────────────────────────────────
@@ -69,7 +74,7 @@ class AnthropicClient(LLMClient):
                 tool_calls.append({"name": block.name, "input": block.input})
         return LLMResponse(text=text, tool_calls=tool_calls)
 
-    def structured_output(self, messages, system="") -> str:
+    def structured_output(self, messages, system="", schema=None) -> str:
         resp = self._client.messages.create(
             model=self._model_id,
             max_tokens=4096,
@@ -194,17 +199,23 @@ class GeminiClient(LLMClient):
 
         return LLMResponse(text=text, tool_calls=tool_calls)
 
-    def structured_output(self, messages, system="") -> str:
+    def structured_output(self, messages, system="", schema=None) -> str:
         from google.genai import types
 
         contents = self._build_contents(messages)
+        cfg_kwargs: dict = {
+            "system_instruction": (system or "") + "\n\nReturn ONLY valid JSON. No markdown, no prose.",
+            "response_mime_type": "application/json",
+        }
+        if schema is not None:
+            try:
+                cfg_kwargs["response_schema"] = self._build_schema(schema)
+            except Exception:
+                pass  # schema enforcement is best-effort; JSON mode still applies
         response = self._client.models.generate_content(
             model=self._model_id,
             contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=(system or "") + "\n\nReturn ONLY valid JSON. No markdown, no prose.",
-                response_mime_type="application/json",
-            ),
+            config=types.GenerateContentConfig(**cfg_kwargs),
         )
         text = ""
         try:
@@ -271,7 +282,7 @@ class OpenRouterClient(LLMClient):
 
         return LLMResponse(text=text, tool_calls=tool_calls)
 
-    def structured_output(self, messages, system="") -> str:
+    def structured_output(self, messages, system="", schema=None) -> str:
         msgs = []
         full_system = (system or "") + "\n\nReturn ONLY valid JSON. No markdown, no prose."
         msgs.append({"role": "system", "content": full_system})
