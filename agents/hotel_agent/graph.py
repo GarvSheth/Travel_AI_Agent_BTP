@@ -24,6 +24,8 @@ from .agent import (
     HotelSearchRequest,
     RecommendedHotel,
     ResolvedLocation,
+    StayDetails,
+    rooms_for_adults,
 )
 from .nodes import HotelWorkflowNodes
 from .state import HotelState
@@ -120,11 +122,24 @@ def _initial_state(request: HotelSearchRequest) -> HotelState:
         "star_rating": request.star_rating or None,   # None -> graph asks
         "min_rating": request.min_rating,
         "radius": request.radius,
+        "adults": request.adults or (request.stay.adults if request.stay else None),
+        "stay": ({"check_in": request.stay.check_in, "check_out": request.stay.check_out,
+                  "currency": request.stay.currency} if request.stay else None),
         "clarification_attempts": 0,
         "clarification_history": [],
         "warnings": [],
         "error": None,
     }
+
+
+def _stay(values: dict) -> StayDetails | None:
+    """Stay for the price lookup: dates from state["stay"], guests from state["adults"]."""
+    stay = values.get("stay")
+    if not stay:
+        return None
+    adults = int(values.get("adults") or 2)
+    return StayDetails(stay["check_in"], stay["check_out"], adults=adults,
+                       rooms=rooms_for_adults(adults), currency=stay["currency"])
 
 
 def _outcome(thread_id: str, values: dict) -> HotelWorkflowOutcome:
@@ -145,6 +160,7 @@ def _outcome(thread_id: str, values: dict) -> HotelWorkflowOutcome:
         candidates_found=values.get("candidates_found", 0),
         location=location,
         warnings=list(values.get("warnings") or []),
+        stay=_stay(values),
     )
     return HotelWorkflowOutcome(thread_id, "complete", result=result)
 

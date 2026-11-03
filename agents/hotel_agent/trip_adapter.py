@@ -7,7 +7,9 @@ city geocoding call that provides the coordinates.
 
 from __future__ import annotations
 
-from .agent import HotelSearchRequest
+from datetime import date, timedelta
+
+from .agent import HotelSearchRequest, StayDetails, rooms_for_adults
 
 
 def _preferences(ex) -> str:
@@ -27,8 +29,23 @@ def _preferences(ex) -> str:
     return "; ".join(parts)
 
 
+def _stay(ex) -> StayDetails | None:
+    """check-in = departure, check-out = return (at least 1 night); rooms = [adults/2]."""
+    try:
+        check_in = date.fromisoformat(ex.departure_date)
+        check_out = date.fromisoformat(ex.return_date)
+    except (TypeError, ValueError):
+        return None
+    if check_out <= check_in:
+        check_out = check_in + timedelta(days=1)
+    adults = max(1, int(ex.num_travelers or 1))
+    return StayDetails(check_in.isoformat(), check_out.isoformat(), adults=adults,
+                       rooms=rooms_for_adults(adults), currency=(ex.currency or "INR").upper())
+
+
 def hotel_request_from_trip(oi) -> HotelSearchRequest:
-    """city <- destination, preferences <- traveller details, vibe <- trip_style."""
+    """city <- destination, preferences <- traveller details, vibe <- trip_style,
+    stay <- dates / travellers / currency (for pricing a selected hotel)."""
 
     ex = oi.trip_extraction
     city = (ex.destination or "").strip()
@@ -39,4 +56,6 @@ def hotel_request_from_trip(oi) -> HotelSearchRequest:
         city=city,
         preferences=_preferences(ex),
         vibe=ex.trip_style or "",
+        adults=max(1, int(ex.num_travelers or 1)),
+        stay=_stay(ex),
     )

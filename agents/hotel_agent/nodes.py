@@ -235,6 +235,7 @@ class HotelWorkflowNodes:
                 reference=(state["latitude"], state["longitude"]),
                 top_n=HOTEL_TOP_N,
                 llm=self._llm,
+                star_filter=state.get("star_rating") or None,
             )
         except HotelRankingError as exc:
             return {"error": f"Could not rank hotels: {exc}"}

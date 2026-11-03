@@ -20,6 +20,8 @@ class HotelState(TypedDict, total=False):
     star_rating: Optional[list[float]]      # None = not asked yet; [] = no preference
     min_rating: Optional[float]
     radius: int
+    adults: Optional[int]                   # travellers from the input; rooms = max(1, adults // 2)
+    stay: Optional[dict]                    # {check_in, check_out, currency}; passed to the output
 
     # ── Clarification ────────────────────────────────────────────────────
     clarification_question: Optional[str]
