@@ -62,6 +62,8 @@ You receive:
 - user_preferences: the traveller's own words about what they want.
 - mandatory_requirements: things the hotel MUST satisfy.
 - preferred_vibe: the atmosphere the traveller wants.
+- star_filter_applied: star categories the search was ALREADY limited to (the traveller's
+  latest choice), or null. It overrides any older star wishes in user_preferences.
 - hotels: hotel records from the API. A null / missing field means UNKNOWN.
 
 Rules:
@@ -72,12 +74,13 @@ Rules:
    stars are below a required minimum), EXCLUDE that hotel.
    If the needed data is unknown (null), the hotel may be included, but the explanation
    must say the requirement could not be verified, and it must earn no score for it.
-3. Then weigh softer preferences: vibe, distance from the preferred location
-   (distance_km), star rating, guest rating (0-10) and review count.
+3. Everything else is a SOFT preference and must never exclude a hotel: vibe, budget,
+   star wishes, interests, distance from the preferred location (distance_km), guest
+   rating (0-10) and review count only raise or lower match_score.
 4. match_score is 0-100 and reflects only evidence present in the record. Hotels with
    little known information must not receive a high score.
-5. Return at most {top_n} hotels, best first, rank starting at 1. If fewer hotels
-   qualify, return only those; if none qualify, return an empty list.
+5. Return exactly {top_n} hotels, best first, rank starting at 1, whenever at least
+   {top_n} hotels are not excluded by rule 2. Return fewer only when fewer remain.
 6. explanation: 1-2 short sentences naming the specific facts from the record that
    make it a match (and any unverified mandatory requirement).
 7. hotel_id and hotel_name must be copied exactly from the records.
@@ -153,8 +156,14 @@ def rank_hotels(
     reference: tuple[float, float] | None = None,
     top_n: int = 5,
     llm=None,
+    star_filter: list[float] | None = None,
 ) -> list[RankedHotel]:
-    """Filter and rank hotels with one LLM call; return at most ``top_n``."""
+    """Filter and rank hotels with one LLM call; return at most ``top_n``.
+
+    Only mandatory requirements may exclude hotels. If none were given and the LLM
+    still returns fewer than ``top_n``, the remaining places are filled with the
+    best-rated nearby hotels (see ``_backfill``).
+    """
 
     if not hotels:
         return []
@@ -168,6 +177,7 @@ def rank_hotels(
         "user_preferences": preferences or None,
         "mandatory_requirements": mandatory_requirements or [],
         "preferred_vibe": vibe or None,
+        "star_filter_applied": star_filter or None,
         "hotels": [summarize_hotel(h, facilities, reference) for h in by_id.values()],
     }
 
@@ -190,7 +200,54 @@ def rank_hotels(
     if not isinstance(rankings, list):
         raise HotelRankingError("LLM ranking response has no 'rankings' list.")
 
-    return _validate_rankings(rankings, by_id, top_n)
+    ranked = _validate_rankings(rankings, by_id, top_n)
+    if len(ranked) < top_n and not mandatory_requirements:
+        ranked = _backfill(ranked, by_id, reference, top_n)
+    return ranked
+
+
+def _backfill(
+    ranked: list[RankedHotel],
+    by_id: dict[str, dict[str, Any]],
+    reference: tuple[float, float] | None,
+    top_n: int,
+) -> list[RankedHotel]:
+    """Top up to ``top_n`` with unranked hotels: best guest rating, then most reviews,
+    then nearest. Scores sit below the LLM's picks; explanations quote API facts only."""
+
+    chosen = {r.hotel_id for r in ranked}
+
+    def order(h: dict[str, Any]):
+        rating = h.get("rating") if isinstance(h.get("rating"), (int, float)) else -1
+        reviews = h.get("reviewCount") if isinstance(h.get("reviewCount"), int) else 0
+        km = distance_km(h, reference)
+        return (-rating, -reviews, km if km is not None else math.inf)
+
+    floor = min((r.match_score for r in ranked), default=60)
+    extra = sorted((h for i, h in by_id.items() if i not in chosen), key=order)
+    for h in extra[: top_n - len(ranked)]:
+        facts = []
+        if isinstance(h.get("rating"), (int, float)):
+            reviews = h.get("reviewCount")
+            facts.append(f"guest rating {h['rating']:g}/10"
+                         + (f" from {reviews:,} reviews" if isinstance(reviews, int) else ""))
+        if isinstance(h.get("stars"), (int, float)):
+            facts.append(f"{h['stars']:g}-star")
+        km = distance_km(h, reference)
+        if km is not None:
+            facts.append(f"{km:.1f} km away")
+        ranked.append(RankedHotel(
+            hotel_id=str(h["id"]),
+            hotel_name=str(h.get("name") or "Unknown"),
+            rank=0,
+            match_score=max(0, floor - 5 * (len(ranked) - len(chosen) + 1)),
+            explanation=("Added as one of the best-rated nearby options"
+                         + (f": {', '.join(facts)}." if facts else ".")),
+        ))
+    logger.info("Backfilled %d hotel(s) to reach %d.", len(ranked) - len(chosen), top_n)
+    for index, hotel in enumerate(ranked, start=1):
+        hotel.rank = index
+    return ranked
 
 
 def _validate_rankings(
