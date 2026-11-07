@@ -5,6 +5,7 @@ from workflows.input_pipeline.graph import (
     build_input_graph,
     current_turn,
     handle_user_message,
+    restore_turn,
     start_conversation,
     submit_answer,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "build_input_graph",
     "current_turn",
     "handle_user_message",
+    "restore_turn",
     "start_conversation",
     "submit_answer",
     "orchestrator_input_to_state",

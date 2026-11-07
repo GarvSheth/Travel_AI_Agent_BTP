@@ -28,7 +28,7 @@ def _transport_section(n: int, ex: TripExtraction) -> str:
 
 
 def _accommodation_section(n: int, ex: TripExtraction, nights: int) -> str:
-    stay_type = ex.accommodation_type if ex.accommodation_type not in (None, "any") else None
+    stay_type = f"{ex.accommodation_type} hotel" if ex.accommodation_type else None
     location_hint = (
         f"Prefer locations that suit a {ex.trip_style} trip"
         + (f" and are close to {', '.join(ex.interests)} attractions" if ex.interests else "")
@@ -75,7 +75,7 @@ def build_orchestrator_prompt(
 
 ## Traveler preferences
 - Trip style: {ex.trip_style or _NO_PREF}
-- Accommodation type: {ex.accommodation_type or _NO_PREF}
+- Hotel star category: {ex.accommodation_type or _NO_PREF}
 - Interests: {", ".join(ex.interests) if ex.interests else _NO_PREF}
 
 ## Tasks

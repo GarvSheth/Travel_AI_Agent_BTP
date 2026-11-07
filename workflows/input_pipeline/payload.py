@@ -49,7 +49,6 @@ def orchestrator_input_to_state(oi: OrchestratorInput) -> dict:
     """Initial main-graph state for a completed, validated OrchestratorInput."""
     return {
         "original_prompt": oi.original_prompt,
-        "user_context": oi.user_context,
         "requested_tasks": oi.requested_tasks,
         "missing_information": oi.missing_information,
         "clarification_required": oi.clarification_required,

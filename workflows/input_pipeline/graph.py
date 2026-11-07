@@ -1,4 +1,8 @@
-"""LangGraph workflow: extract -> validate -> (ask -> await answer -> extract ...) | finalize."""
+"""LangGraph workflow: extract -> validate -> (ask -> await answer -> extract ...) | finalize.
+
+The app compiles it with ``workflow_checkpointer("input")`` (MongoDB, namespace
+``workflow:input``) and runs it on the conversation's shared thread id.
+"""
 from __future__ import annotations
 
 from typing import Optional
@@ -8,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from schemas.trip_schema import OrchestratorInput, TripExtraction
+from services.checkpointing import CheckpointNotFound, thread_config
 from workflows.input_pipeline.nodes import (
     ask_question_node,
     await_answer_node,
@@ -86,31 +91,39 @@ def start_conversation(graph, thread_id: str, prompt: str) -> TurnResult:
         "status": "collecting_input",
         "final_payload": None,
     }
-    config = {"configurable": {"thread_id": thread_id}}
-    return _to_turn_result(graph.invoke(initial, config))
+    return _to_turn_result(graph.invoke(initial, thread_config(thread_id)))
 
 
 def submit_answer(graph, thread_id: str, answer: str) -> TurnResult:
-    config = {"configurable": {"thread_id": thread_id}}
-    return _to_turn_result(graph.invoke(Command(resume=answer), config))
+    return _to_turn_result(graph.invoke(Command(resume=answer), thread_config(thread_id)))
 
 
 def _consumed_user_turns(graph, thread_id: str) -> int:
-    snap = graph.get_state({"configurable": {"thread_id": thread_id}})
+    snap = graph.get_state(thread_config(thread_id))
     history = (snap.values or {}).get("conversation_history", [])
     return sum(1 for m in history if m["role"] == "user")
 
 
 def current_turn(graph, thread_id: str) -> TurnResult:
     """Result for the thread's latest checkpoint, finishing an interrupted run if needed."""
-    config = {"configurable": {"thread_id": thread_id}}
+    config = thread_config(thread_id)
     snap = graph.get_state(config)
+    if not snap.values:
+        raise CheckpointNotFound(f"No saved conversation state for thread {thread_id}.")
     if snap.values.get("final_payload"):
         return _to_turn_result(snap.values)
     interrupts = [i for task in snap.tasks for i in task.interrupts]
     if interrupts:
         return TurnResult(question=interrupts[0].value["question"], payload=None)
     return _to_turn_result(graph.invoke(None, config))
+
+
+def restore_turn(graph, thread_id: str) -> TurnResult:
+    """Where a saved conversation stands: its pending question or its final payload.
+
+    Raises CheckpointNotFound when the thread has no saved state (never starts over).
+    """
+    return current_turn(graph, thread_id)
 
 
 def handle_user_message(graph, thread_id: str, text: str, turn_index: int) -> TurnResult:

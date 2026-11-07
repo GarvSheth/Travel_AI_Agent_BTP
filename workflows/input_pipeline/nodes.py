@@ -15,11 +15,32 @@ def _trip(state: InputPipelineState) -> TripExtraction:
     return TripExtraction.model_validate(state.get("trip_extraction") or {})
 
 
+def _print_extraction(message: str, updates: dict, rejected: list[dict],
+                      trip: TripExtraction, error: Exception | None) -> None:
+    """Show in the terminal what was fetched from the user's latest message."""
+    lines = ["", "─" * 70, f"[input_pipeline] user message: {message!r}"]
+    if error is not None:
+        lines.append(f"  extraction FAILED: {type(error).__name__}: {error}")
+    elif updates:
+        lines.append("  fetched:")
+        lines += [f"    {field:20} = {value!r}" for field, value in updates.items()]
+    else:
+        lines.append("  fetched: (nothing)")
+    for r in rejected:
+        lines.append(f"  rejected: {r['field']} = {r['value']!r} ({r['error']})")
+    known = {k: v for k, v in trip.model_dump().items() if v not in (None, [], {})}
+    lines.append("  trip so far:")
+    lines += [f"    {field:20} = {value!r}" for field, value in known.items()]
+    lines.append("─" * 70)
+    print("\n".join(lines), flush=True)
+
+
 def extract_node(state: InputPipelineState) -> dict:
     history = state.get("conversation_history", [])
     message = state["latest_user_message"]
     current = _trip(state)
 
+    error = None
     try:
         updates = call_llm_extraction(
             message,
@@ -28,10 +49,12 @@ def extract_node(state: InputPipelineState) -> dict:
             history=history[:-1],  # history already ends with `message`
             question=state.get("pending_question"),
         )
-    except Exception:
+    except Exception as exc:
         updates = {}
+        error = exc
 
     updated, rejected = merge_updates(current, updates)
+    _print_extraction(message, updates, rejected, updated, error)
 
     return {
         "trip_extraction": updated.model_dump(),

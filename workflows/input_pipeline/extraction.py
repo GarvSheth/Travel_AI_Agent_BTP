@@ -7,7 +7,7 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from schemas.trip_schema import TripExtraction
+from schemas.trip_schema import TripExtraction, parse_star_categories
 
 SCALAR_FIELDS = [
     "destination", "origin", "departure_date", "return_date",
@@ -67,11 +67,18 @@ return a fact for EVERY one (destination, origin, departure_date, return_date,
 duration, num_travelers, budget, currency, preferences, ...).
 
 Value formats:
+- destination, origin: the place's correct, standard English spelling, as used on maps,
+  so it can be geocoded. Fix typos and misspellings of real places ("Jodhur" ->
+  "Jodhpur", "banglore" -> "Bangalore", "goa" -> "Goa"); keep the place the user
+  meant, never swap it for a different place. The quote stays the user's exact words.
 - departure_date, return_date: YYYY-MM-DD
 - duration_min_days, duration_max_days, num_travelers: integer digits only, e.g. "3"
 - budget: number digits only, e.g. "20000"
 - currency: ISO 4217 code, e.g. "INR"
-- accommodation_type: one of hotel, hostel, airbnb, any
+- accommodation_type: the HOTEL STAR CATEGORY only, as star numbers 1-5 separated by
+  commas: "3-star" -> "3"; "4 or 5 star" -> "4,5"; "at least 4 star" -> "4,4.5,5".
+  Only when the user states a star rating; omit it for "a hotel", "luxury", "budget
+  stay" and other wording without stars.
 - interests, traveler_details, requested_tasks: one fact per item
 
 RULES:
@@ -92,7 +99,9 @@ RULES:
 6. currency only when the user states it or uses an unambiguous symbol/word
    ($ = USD, ₹/rs/rupees = INR, € = EUR, £ = GBP). Never assume a currency.
    budget is the number alone ("20000 rs" -> budget 20000, currency INR).
-7. "solo"/"just me" means num_travelers 1; "couple"/"me and my wife" means 2.
+7. num_travelers is the total head count as digits: the user plus every companion
+   mentioned. "solo"/"just me" -> "1"; "couple"/"me and my wife"/"me and my friend" -> "2";
+   "me and 2 friends" -> "3"; "family of 4" -> "4". Quote the phrase naming the people.
 8. If the user declines a preference ("no preference", "skip", "none"), omit that field.
 9. For list fields return only the items the latest message adds.
 10. requested_tasks: only when the user explicitly limits what they want (e.g. "just book
@@ -174,6 +183,8 @@ def parse_extraction(data: dict, latest_message: str) -> dict:
             continue
         if value.lower() in _PLACEHOLDERS:
             continue
+        if field == "accommodation_type" and not parse_star_categories(value):
+            continue                      # no star rating stated -> nothing to keep
         if field in UNQUOTED_FIELDS:
             if value not in TASKS:
                 continue
@@ -193,8 +204,6 @@ def _normalize(field: str, value):
         value = value.strip()
     if field == "currency" and isinstance(value, str):
         return value.upper()
-    if field == "accommodation_type" and isinstance(value, str):
-        return value.lower()
     return value
 
 

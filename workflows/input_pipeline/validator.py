@@ -17,7 +17,9 @@ REQUIRED_FIELDS = [
     "destination", "origin", "departure_date", "return_date",
     "num_travelers", "budget", "currency",
 ]
-OPTIONAL_FIELDS = ["trip_style", "accommodation_type", "interests", "traveler_details"]
+# accommodation_type (hotel star category) is kept when stated but never asked here:
+# the hotel agent asks for it with its own star picker.
+OPTIONAL_FIELDS = ["trip_style", "interests", "traveler_details"]
 
 
 class ValidationResult(BaseModel):
