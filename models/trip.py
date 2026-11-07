@@ -28,7 +28,8 @@ class TripRequest(BaseModel):
     departure_date: str   # "YYYY-MM-DD"
     return_date: str      # "YYYY-MM-DD"
     num_travelers: int = Field(ge=1, le=20)
-    budget_usd: float = Field(gt=0)
+    budget_usd: Optional[float] = Field(default=None, gt=0)
+    budget: Optional[float] = Field(default=None, gt=0)  # amount in preferred_currency
     preferred_currency: str = "USD"
     accommodation_type: str = "any"  # "hotel"|"hostel"|"airbnb"|"any"
     trip_style: Optional[str] = None
